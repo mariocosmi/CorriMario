@@ -34,12 +34,12 @@
                 <Image.Clip>
                     <RectangleGeometry x:Name="clipMusetto"></RectangleGeometry>
                 </Image.Clip>
-<!--                <Image.RenderTransform>
-                    <TranslateTransform Y="{Binding Percentuale}"></TranslateTransform>
-                </Image.RenderTransform> -->
             </Image>
-<!--            <Rectangle x:Name="ImgAlfa" Canvas.ZIndex="10" Height="{Binding Percentuale}" Fill="Black" Margin="0,1,0,-1">
-            </Rectangle> -->
+            <Image x:Name="imgMusettoSfondo" Stretch="UniformToFill">
+                <Image.Clip>
+                    <RectangleGeometry x:Name="clipMusettoSfondo"></RectangleGeometry>
+                </Image.Clip>
+            </Image>
         </Grid>
 
         <Button Grid.Row="2" Tap="Button_Tap_1">
