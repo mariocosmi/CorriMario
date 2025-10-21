@@ -1,151 +1,263 @@
-﻿using System;
 using System.ComponentModel;
-using System.Windows;
-using System.Windows.Input;
-using System.Windows.Media.Imaging;
-using Microsoft.Phone.Controls;
-using Microsoft.Phone.Shell;
-using System.Device.Location;
+using System.Runtime.CompilerServices;
 
-namespace CorriMario {
-	public partial class MainPage : PhoneApplicationPage, INotifyPropertyChanged {
-		// Constructor
-		public MainPage() {
-			InitializeComponent();
-			PhoneApplicationService.Current.State["percentuale"] = "0";
-			PhoneApplicationService.Current.State["totale"] = "0";
-			PhoneApplicationService.Current.State["distanza"] = "";
-			PhoneApplicationService.Current.State["avviato"] = "N";
-			PhoneApplicationService.Current.State["lastLat"] = "0";
-			PhoneApplicationService.Current.State["lastLong"] = "0";
-			this.DataContext = this;
-			AggiornaMusetto(0);
+namespace CorriMario;
+
+public partial class MainPage : ContentPage, INotifyPropertyChanged
+{
+	private CancellationTokenSource? _cancelTokenSource;
+	private bool _isTracking;
+
+	public MainPage()
+	{
+		InitializeComponent();
+
+		// Initialize preferences if not set
+		if (!Preferences.ContainsKey("percentuale"))
+			Preferences.Set("percentuale", 0.0);
+		if (!Preferences.ContainsKey("totale"))
+			Preferences.Set("totale", 0.0);
+		if (!Preferences.ContainsKey("distanza"))
+			Preferences.Set("distanza", "");
+		if (!Preferences.ContainsKey("avviato"))
+			Preferences.Set("avviato", false);
+		if (!Preferences.ContainsKey("lastLat"))
+			Preferences.Set("lastLat", 0.0);
+		if (!Preferences.ContainsKey("lastLong"))
+			Preferences.Set("lastLong", 0.0);
+
+		this.DataContext = this;
+		this.BindingContext = this;
+
+		// Wait for layout to complete before updating
+		this.SizeChanged += (s, e) =>
+		{
+			if (ContentPanel.Width > 0 && ContentPanel.Height > 0)
+			{
+				AggiornaMusetto(Preferences.Get("totale", 0.0));
+			}
+		};
+	}
+
+	public new event PropertyChangedEventHandler? PropertyChanged;
+
+	protected override void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+	{
+		PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+		base.OnPropertyChanged(propertyName);
+	}
+
+	public string Distanza
+	{
+		get
+		{
+			if (!Avviato)
+				return "Guadagnati il musetto!";
+			return Preferences.Get("distanza", "");
 		}
-
-		public event PropertyChangedEventHandler PropertyChanged;
-		private void NotifyPropertyChanged(String propertyName) {
-			PropertyChangedEventHandler handler = PropertyChanged;
-			if (null != handler) {
-				handler(this, new PropertyChangedEventArgs(propertyName));
+		set
+		{
+			if (value != Distanza)
+			{
+				Preferences.Set("distanza", value);
+				OnPropertyChanged();
 			}
 		}
+	}
 
-		GeoCoordinateWatcher _watcher;
-
-		public string Distanza {
-			get {
-				if (!this.Avviato)
-					return "Guadagnati il musetto!";
-				return PhoneApplicationService.Current.State["distanza"].ToString();
+	public bool Avviato
+	{
+		get => Preferences.Get("avviato", false);
+		set
+		{
+			if (value != Avviato)
+			{
+				Preferences.Set("avviato", value);
+				if (!value)
+					Preferences.Set("distanza", "");
+				OnPropertyChanged();
+				OnPropertyChanged(nameof(Distanza));
 			}
-			set {
-				if (value != this.Distanza) {
-					PhoneApplicationService.Current.State["distanza"] = value;
-					NotifyPropertyChanged("Distanza");
+		}
+	}
+
+	public double Percentuale
+	{
+		get => Preferences.Get("percentuale", 0.0);
+		set
+		{
+			if (value != Percentuale)
+			{
+				Preferences.Set("percentuale", value);
+				OnPropertyChanged();
+			}
+		}
+	}
+
+	private async void Button_Clicked(object? sender, EventArgs e)
+	{
+		try
+		{
+			if (_isTracking)
+			{
+				// Stop tracking
+				await StopTracking();
+				btnStartStop.Text = "Riparti";
+			}
+			else
+			{
+				// Start tracking
+				await StartTracking();
+				btnStartStop.Text = "Fai una pausa";
+			}
+			Avviato = _isTracking;
+		}
+		catch (Exception ex)
+		{
+			await DisplayAlert("Errore", $"Impossibile avviare il GPS: {ex.Message}", "OK");
+		}
+	}
+
+	private async Task StartTracking()
+	{
+		// Request location permission
+		var status = await Permissions.CheckStatusAsync<Permissions.LocationWhenInUse>();
+		if (status != PermissionStatus.Granted)
+		{
+			status = await Permissions.RequestAsync<Permissions.LocationWhenInUse>();
+		}
+
+		if (status != PermissionStatus.Granted)
+		{
+			await DisplayAlert("Permesso negato", "È necessario il permesso di localizzazione per tracciare la corsa.", "OK");
+			return;
+		}
+
+		_cancelTokenSource = new CancellationTokenSource();
+		_isTracking = true;
+
+		// Start location tracking loop
+		_ = Task.Run(async () =>
+		{
+			while (!_cancelTokenSource.Token.IsCancellationRequested)
+			{
+				try
+				{
+					var request = new GeolocationRequest(GeolocationAccuracy.Best, TimeSpan.FromSeconds(10));
+					var location = await Geolocation.GetLocationAsync(request, _cancelTokenSource.Token);
+
+					if (location != null)
+					{
+						await MainThread.InvokeOnMainThreadAsync(() => OnPositionChanged(location));
+					}
 				}
-			}
-		}
-
-		public bool Avviato {
-			get {
-				return PhoneApplicationService.Current.State["avviato"].ToString() == "S";
-			}
-			set {
-				if (value != this.Avviato) {
-					PhoneApplicationService.Current.State["avviato"] = value ? "S" : "N";
-					if (!value)
-						PhoneApplicationService.Current.State["distanza"] = "";
-					NotifyPropertyChanged("Avviato");
+				catch (Exception ex)
+				{
+					// Location error - log it
+					System.Diagnostics.Debug.WriteLine($"Errore GPS: {ex.Message}");
 				}
-			}
-		}
 
-		public double Percentuale {
-			get {
-				var ret = 0.0;
-				double.TryParse(PhoneApplicationService.Current.State["percentuale"].ToString(), out ret);
-				return ret;
+				// Wait before next update (check every 10 seconds or when moved 25+ meters)
+				await Task.Delay(10000, _cancelTokenSource.Token);
 			}
-			set {
-				if (value != this.Percentuale) {
-					PhoneApplicationService.Current.State["percentuale"] = value.ToString();
-					NotifyPropertyChanged("Percentuale");
-				}
-			}
-		}
+		}, _cancelTokenSource.Token);
+	}
 
-		private void Button_Tap_1(object sender, GestureEventArgs e) {
-			if (_watcher == null) {
-				_watcher = new GeoCoordinateWatcher(GeoPositionAccuracy.High);
-				_watcher.MovementThreshold = 25;
-				_watcher.StatusChanged += OnStatusChanged;
-				_watcher.PositionChanged += OnPositionChanged;
-			}
-			try {
-				if (this.Avviato) {
-					_watcher.Stop();
-					this.btnStartStop.Text = "Riparti";
-					PhoneApplicationService phoneAppService = PhoneApplicationService.Current;
-					phoneAppService.UserIdleDetectionMode = IdleDetectionMode.Enabled;
-				} else {
-					_watcher.Start();
-					this.btnStartStop.Text = "Fai una pausa";
-					PhoneApplicationService phoneAppService = PhoneApplicationService.Current;
-					phoneAppService.UserIdleDetectionMode = IdleDetectionMode.Disabled;
-				}
-				this.Avviato = !this.Avviato;
-			} catch (Exception) {
-				if (System.Diagnostics.Debugger.IsAttached)
-					System.Diagnostics.Debugger.Break();
-			}
+	private async Task StopTracking()
+	{
+		if (_cancelTokenSource != null && !_cancelTokenSource.IsCancellationRequested)
+		{
+			_cancelTokenSource.Cancel();
+			_cancelTokenSource.Dispose();
+			_cancelTokenSource = null;
 		}
+		_isTracking = false;
+		await Task.CompletedTask;
+	}
 
-		void OnPositionChanged(object sender, GeoPositionChangedEventArgs<GeoCoordinate> e) {
-			if (e.Position.Location.IsUnknown)
-				return;
-			try {
-				var lastLong = 0.0;
-				var lastLat = 0.0;
-				Double.TryParse(PhoneApplicationService.Current.State["lastLong"].ToString(), out lastLong);
-				Double.TryParse(PhoneApplicationService.Current.State["lastLat"].ToString(), out lastLat);
-				if (lastLat != 0.0 && lastLong != 0.0) {
-					var last = new GeoCoordinate(lastLat, lastLong);
-					var dist = last.GetDistanceTo(e.Position.Location);
-					var totDist = 0.0;
-					Double.TryParse(PhoneApplicationService.Current.State["totale"].ToString(), out totDist);
+	private void OnPositionChanged(Location location)
+	{
+		try
+		{
+			var lastLong = Preferences.Get("lastLong", 0.0);
+			var lastLat = Preferences.Get("lastLat", 0.0);
+
+			if (lastLat != 0.0 && lastLong != 0.0)
+			{
+				// Calculate distance from last position
+				var lastLocation = new Location(lastLat, lastLong);
+				var dist = Location.CalculateDistance(lastLocation, location, DistanceUnits.Meters);
+
+				// Only count if moved more than 25 meters (to avoid GPS jitter)
+				if (dist >= 25)
+				{
+					var totDist = Preferences.Get("totale", 0.0);
 					totDist += dist;
-					PhoneApplicationService.Current.State["totale"] = totDist.ToString();
-					this.Distanza = totDist.ToString("Hai corso per 0 m.");
+					Preferences.Set("totale", totDist);
+					Distanza = $"Hai corso per {totDist:F0} m.";
 					AggiornaMusetto(totDist);
+
+					// Update last position
+					Preferences.Set("lastLong", location.Longitude);
+					Preferences.Set("lastLat", location.Latitude);
 				}
-//				this.btnStartStop.Text = string.Format("Ultima lettura {0} {1}", e.Position.Location.Longitude, e.Position.Location.Latitude);
-				PhoneApplicationService.Current.State["lastLong"] = e.Position.Location.Longitude;
-				PhoneApplicationService.Current.State["lastLat"] = e.Position.Location.Latitude;
-			} catch (Exception) {
-				if (System.Diagnostics.Debugger.IsAttached)
-					System.Diagnostics.Debugger.Break();
+			}
+			else
+			{
+				// First position - just save it
+				Preferences.Set("lastLong", location.Longitude);
+				Preferences.Set("lastLat", location.Latitude);
 			}
 		}
-
-		string ImmagineAdatta(double totDist) {
-			return totDist < 3000 ? "level1.jpg" : totDist < 6000 ? "level2.jpg" : "level3.jpg";
+		catch (Exception ex)
+		{
+			System.Diagnostics.Debug.WriteLine($"Errore nell'aggiornamento posizione: {ex.Message}");
 		}
+	}
 
-		string ImmagineSfondo(double totDist) {
-			return totDist < 3000 ? "level0.jpg" : totDist < 6000 ? "level1.jpg" : "level2.jpg";
+	private string ImmagineAdatta(double totDist)
+	{
+		return totDist < 3000 ? "level1.jpg" : totDist < 6000 ? "level2.jpg" : "level3.jpg";
+	}
+
+	private string ImmagineSfondo(double totDist)
+	{
+		return totDist < 3000 ? "level0.jpg" : totDist < 6000 ? "level1.jpg" : "level2.jpg";
+	}
+
+	private void AggiornaMusetto(double totDist)
+	{
+		try
+		{
+			// Set image sources
+			imgMusetto.Source = ImageSource.FromFile(ImmagineAdatta(totDist));
+			imgMusettoSfondo.Source = ImageSource.FromFile(ImmagineSfondo(totDist));
+
+			// Wait for images to be sized
+			if (ContentPanel.Width <= 0 || ContentPanel.Height <= 0)
+				return;
+
+			// Calculate fill percentage
+			var height = ContentPanel.Height;
+			Percentuale = totDist < 9000 ? height * ((totDist % 3000) / 3000) : height;
+
+			// Update clipping rectangles
+			clipMusetto.Rect = new Rect(0, 0, ContentPanel.Width, Percentuale);
+			clipMusettoSfondo.Rect = new Rect(0, Percentuale, ContentPanel.Width, height - Percentuale);
 		}
-
-		void AggiornaMusetto(double totDist) {
-			// dovrebbe essere 5 km per etto di musetto ma io sono buono ...
-			this.imgMusetto.Source = new BitmapImage(new Uri(ImmagineAdatta(totDist), UriKind.Relative));
-			this.Percentuale = totDist < 9000 ? this.imgMusetto.ActualHeight * (totDist % 3000) / 3000 : this.imgMusetto.ActualHeight;
-			this.clipMusetto.Rect = new Rect(0, 0, this.imgMusetto.ActualWidth, this.Percentuale);
-			// Ora aggiorno lo sfondo
-			this.imgMusettoSfondo.Source = new BitmapImage(new Uri(ImmagineSfondo(totDist), UriKind.Relative));
-			this.clipMusettoSfondo.Rect = new Rect(0, this.Percentuale, this.imgMusetto.ActualWidth, this.ContentPanel.ActualHeight);
+		catch (Exception ex)
+		{
+			System.Diagnostics.Debug.WriteLine($"Errore nell'aggiornamento musetto: {ex.Message}");
 		}
+	}
 
-		void OnStatusChanged(object sender, GeoPositionStatusChangedEventArgs e) {
+	protected override void OnDisappearing()
+	{
+		base.OnDisappearing();
+		// Stop tracking when page disappears
+		if (_isTracking)
+		{
+			_ = StopTracking();
 		}
 	}
 }
