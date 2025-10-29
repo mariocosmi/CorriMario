@@ -1,156 +1,156 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Questo file fornisce indicazioni a Claude Code (claude.ai/code) quando lavora con il codice in questo repository.
 
-## Project Overview
+## Panoramica del progetto
 
-Corri Mario is a fitness tracking app migrated from Windows Phone 7.1 Silverlight to .NET MAUI. It tracks running distance via GPS and gamifies the experience by showing how much "musetto" (Italian cured meat) you've earned based on distance.
+Corri Mario è un'app di fitness tracking migrata da Windows Phone 7.1 Silverlight a .NET MAUI. Traccia la distanza percorsa correndo tramite GPS e gamifica l'esperienza mostrando quanto "musetto" hai guadagnato in base alla distanza.
 
-This is a **single-page application** with all UI and logic in MainPage. The app targets .NET 8.0 and supports Android, iOS, Windows, and macOS Catalyst.
+È un'**applicazione single-page** con tutta l'UI e la logica in MainPage. L'app è basata su .NET 8.0 e supporta Android, iOS, Windows e macOS Catalyst.
 
-## Build and Run Commands
+## Comandi di build ed esecuzione
 
-### Restore and Build
+### Restore e Build
 
 ```bash
-# Restore NuGet packages
+# Ripristina i pacchetti NuGet
 dotnet restore
 
-# Build for specific platforms
+# Build per piattaforme specifiche
 dotnet build -f net8.0-android
-dotnet build -f net8.0-ios                        # Requires macOS
-dotnet build -f net8.0-windows10.0.19041.0        # Requires Windows
-dotnet build -f net8.0-maccatalyst                # Requires macOS
+dotnet build -f net8.0-ios                        # Richiede macOS
+dotnet build -f net8.0-windows10.0.19041.0        # Richiede Windows
+dotnet build -f net8.0-maccatalyst                # Richiede macOS
 ```
 
-### Run on Devices/Emulators
+### Esecuzione su dispositivi/emulatori
 
 ```bash
 # Android
 dotnet build -f net8.0-android -t:Run
 
-# iOS (requires macOS)
+# iOS (richiede macOS)
 dotnet build -f net8.0-ios -t:Run
 
 # Windows
 dotnet build -f net8.0-windows10.0.19041.0 -t:Run
 ```
 
-## High-Level Architecture
+## Architettura ad alto livello
 
-### Single-Page Application Pattern
+### Pattern Single-Page Application
 
-The entire app runs on a single ContentPage (`MainPage.xaml/.cs`). There is no navigation framework—all functionality is self-contained:
+L'intera app gira su un singolo ContentPage (`MainPage.xaml/.cs`). Non c'è un framework di navigazione—tutta la funzionalità è autonoma:
 
-- **App.xaml.cs**: Minimal application entry point that sets MainPage as the root
-- **MainPage.xaml.cs**: Contains all GPS tracking logic, state management, and UI updates
-- **MauiProgram.cs**: Standard MAUI app configuration
+- **App.xaml.cs**: Punto di ingresso minimo dell'applicazione che imposta MainPage come root
+- **MainPage.xaml.cs**: Contiene tutta la logica di tracciamento GPS, gestione dello stato e aggiornamenti UI
+- **MauiProgram.cs**: Configurazione standard dell'app MAUI
 
-### Data Persistence Strategy
+### Strategia di persistenza dati
 
-**Uses MAUI Preferences API** (key-value store that persists across app sessions):
+**Usa l'API Preferences di MAUI** (store chiave-valore che persiste tra le sessioni):
 
-- `totale`: Total distance run in meters (double)
-- `distanza`: Formatted distance string displayed to user
-- `percentuale`: Visual fill percentage for current level
-- `avviato`: Boolean tracking state (running/paused)
-- `lastLat`, `lastLong`: Last GPS position for distance calculation
+- `totale`: Distanza totale percorsa in metri (double)
+- `distanza`: Stringa formattata della distanza mostrata all'utente
+- `percentuale`: Percentuale di riempimento visuale per il livello corrente
+- `avviato`: Stato di tracking booleano (in esecuzione/in pausa)
+- `lastLat`, `lastLong`: Ultima posizione GPS per il calcolo della distanza
 
-**Important**: Properties in MainPage read/write directly to Preferences—there is no in-memory state. Every property getter/setter uses `Preferences.Get()`/`Preferences.Set()`.
+**Importante**: Le proprietà in MainPage leggono/scrivono direttamente su Preferences—non c'è stato in memoria. Ogni getter/setter di proprietà usa `Preferences.Get()`/`Preferences.Set()`.
 
-### GPS Tracking Architecture
+### Architettura del tracciamento GPS
 
-**Async polling loop pattern** (not event-based):
+**Pattern async polling loop** (non basato su eventi):
 
-1. User taps Start → `StartTracking()` creates a `CancellationTokenSource`
-2. Spawns background `Task.Run()` loop that polls GPS every 10 seconds
-3. Each GPS reading calls `OnPositionChanged()` on main thread via `MainThread.InvokeOnMainThreadAsync()`
-4. Distance calculated only if moved >25m from last position (filters GPS jitter)
-5. User taps Pause → `StopTracking()` cancels token, stopping the loop
+1. L'utente preme Start → `StartTracking()` crea un `CancellationTokenSource`
+2. Genera un loop `Task.Run()` in background che interroga il GPS ogni 10 secondi
+3. Ogni lettura GPS chiama `OnPositionChanged()` sul thread principale tramite `MainThread.InvokeOnMainThreadAsync()`
+4. La distanza viene calcolata solo se si è mossi >25m dall'ultima posizione (filtra il jitter GPS)
+5. L'utente preme Pausa → `StopTracking()` cancella il token, fermando il loop
 
-**Key technical decisions**:
-- **25-meter movement threshold**: Ignores GPS readings within 25m of last position to prevent drift
-- **10-second polling interval**: `await Task.Delay(10000)` between GPS checks
-- **High accuracy mode**: Uses `GeolocationAccuracy.Best` for precise distance tracking
-- **Permission handling**: Requests `LocationWhenInUse` permission on first use
+**Decisioni tecniche chiave**:
+- **Soglia di movimento di 25 metri**: Ignora le letture GPS entro 25m dall'ultima posizione per prevenire il drift
+- **Intervallo di polling di 10 secondi**: `await Task.Delay(10000)` tra i controlli GPS
+- **Modalità alta precisione**: Usa `GeolocationAccuracy.Best` per tracciamento preciso della distanza
+- **Gestione permessi**: Richiede il permesso `LocationWhenInUse` al primo utilizzo
 
-### Visual "Musettometro" System
+### Sistema visuale "Musettometro"
 
-**Progressive image clipping** using XAML RectangleGeometry:
+**Clipping progressivo delle immagini** usando XAML RectangleGeometry:
 
-The UI shows overlaid images (foreground + background) that are clipped to create a "filling" effect:
+L'UI mostra immagini sovrapposte (foreground + background) che vengono ritagliate per creare un effetto di "riempimento":
 
-1. **Level progression** (4 levels based on distance):
-   - 0-3000m: level0.jpg background, level1.jpg foreground
-   - 3000-6000m: level1.jpg background, level2.jpg foreground
-   - 6000-9000m: level2.jpg background, level3.jpg foreground
-   - 9000m+: Fully filled (level3.jpg)
+1. **Progressione dei livelli** (4 livelli basati sulla distanza):
+   - 0-3000m: level0.jpg sfondo, level1.jpg primo piano
+   - 3000-6000m: level1.jpg sfondo, level2.jpg primo piano
+   - 6000-9000m: level2.jpg sfondo, level3.jpg primo piano
+   - 9000m+: Completamente riempito (level3.jpg)
 
-2. **Clipping rectangles**:
-   - `clipMusetto`: Shows "filled" portion (height = percentage of current 3000m segment)
-   - `clipMusettoSfondo`: Shows "unfilled" portion (remaining height)
+2. **Rettangoli di clipping**:
+   - `clipMusetto`: Mostra la porzione "riempita" (altezza = percentuale del segmento corrente di 3000m)
+   - `clipMusettoSfondo`: Mostra la porzione "non riempita" (altezza rimanente)
 
-3. **Update trigger**:
-   - Called from `OnPositionChanged()` when distance increases
-   - Also called on `SizeChanged` event to handle layout changes/rotations
+3. **Trigger di aggiornamento**:
+   - Chiamato da `OnPositionChanged()` quando la distanza aumenta
+   - Chiamato anche all'evento `SizeChanged` per gestire cambi di layout/rotazioni
 
-**Why this matters**: When modifying UI, remember that images must load before clipping works. The `SizeChanged` handler ensures clipping is recalculated after layout.
+**Perché è importante**: Quando si modifica l'UI, ricorda che le immagini devono caricarsi prima che il clipping funzioni. Il gestore `SizeChanged` assicura che il clipping venga ricalcolato dopo il layout.
 
-## Platform-Specific Configuration
+## Configurazione specifica per piattaforma
 
 ### Android (Platforms/Android/)
-- **AndroidManifest.xml**: Declares `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` permissions
-- **MainActivity.cs**: Standard MAUI activity with orientation/screen size change handling
+- **AndroidManifest.xml**: Dichiara i permessi `ACCESS_FINE_LOCATION` e `ACCESS_COARSE_LOCATION`
+- **MainActivity.cs**: Activity MAUI standard con gestione orientamento/dimensioni schermo
 
 ### iOS (Platforms/iOS/)
-- **Info.plist**: Includes `NSLocationWhenInUseUsageDescription` with Italian explanation
-- **AppDelegate.cs**: Standard MAUI iOS delegate
+- **Info.plist**: Include `NSLocationWhenInUseUsageDescription` con spiegazione in italiano
+- **AppDelegate.cs**: Delegate iOS standard per MAUI
 
 ### Windows (Platforms/Windows/)
-- **App.xaml**: WinUI application wrapper for MAUI
+- **App.xaml**: Wrapper dell'applicazione WinUI per MAUI
 
-## Migration Notes (Windows Phone → MAUI)
+## Note sulla migrazione (Windows Phone → MAUI)
 
-If you need to migrate or modernize code, understand these key replacements:
+Se devi migrare o modernizzare il codice, comprendi queste sostituzioni chiave:
 
-| Windows Phone 7.1 | .NET MAUI Equivalent |
+| Windows Phone 7.1 | Equivalente .NET MAUI |
 |-------------------|----------------------|
-| `GeoCoordinateWatcher` + events | `Geolocation.GetLocationAsync()` polling |
-| `PhoneApplicationService.State` | `Preferences` API |
+| `GeoCoordinateWatcher` + eventi | `Geolocation.GetLocationAsync()` polling |
+| `PhoneApplicationService.State` | API `Preferences` |
 | `PhoneApplicationPage` | `ContentPage` |
 | `GeoCoordinate.GetDistanceTo()` | `Location.CalculateDistance()` |
-| Phone namespaces | `Microsoft.Maui.*` namespaces |
+| Namespace Phone | Namespace `Microsoft.Maui.*` |
 
-**Files with `.old` extension** are original Windows Phone code preserved as reference.
+**I file con estensione `.old`** sono il codice originale di Windows Phone preservato come riferimento.
 
-## Key Implementation Details
+## Dettagli implementativi chiave
 
-### Why Task.Run for GPS tracking?
-MAUI's Geolocation API is request/response (not event-driven like old GeoCoordinateWatcher). The app uses `Task.Run()` with a while loop to create continuous tracking, manageable via `CancellationToken`.
+### Perché Task.Run per il tracciamento GPS?
+L'API Geolocation di MAUI è request/response (non event-driven come il vecchio GeoCoordinateWatcher). L'app usa `Task.Run()` con un loop while per creare un tracciamento continuo, gestibile tramite `CancellationToken`.
 
-### Why both DataContext and BindingContext?
-`this.DataContext = this` was from Windows Phone migration; `this.BindingContext = this` is MAUI standard. Both are set for compatibility during migration.
+### Perché sia DataContext che BindingContext?
+`this.DataContext = this` deriva dalla migrazione da Windows Phone; `this.BindingContext = this` è lo standard MAUI. Entrambi sono impostati per compatibilità durante la migrazione.
 
-### INotifyPropertyChanged implementation
-MainPage implements `INotifyPropertyChanged` manually. Properties like `Distanza`, `Avviato`, `Percentuale` notify UI of changes via `OnPropertyChanged()`. This is necessary because values are stored in Preferences (not backing fields), so the UI wouldn't auto-update otherwise.
+### Implementazione INotifyPropertyChanged
+MainPage implementa `INotifyPropertyChanged` manualmente. Proprietà come `Distanza`, `Avviato`, `Percentuale` notificano l'UI dei cambiamenti tramite `OnPropertyChanged()`. Questo è necessario perché i valori sono memorizzati in Preferences (non in backing fields), quindi l'UI non si aggiornerebbe automaticamente altrimenti.
 
-### OnDisappearing lifecycle
-When the page disappears (app backgrounded), `OnDisappearing()` stops GPS tracking to save battery. Data persists in Preferences, so tracking can resume when user returns.
+### Lifecycle OnDisappearing
+Quando la pagina scompare (app in background), `OnDisappearing()` ferma il tracciamento GPS per risparmiare batteria. I dati persistono in Preferences, quindi il tracciamento può riprendere quando l'utente ritorna.
 
-## Adding New Features
+## Aggiungere nuove funzionalità
 
-### To add a new tracked metric:
-1. Add Preference key initialization in `MainPage()` constructor
-2. Create public property with `get`/`set` that uses `Preferences.Get()`/`Preferences.Set()`
-3. Call `OnPropertyChanged()` in setter
-4. Bind to UI element in MainPage.xaml
+### Per aggiungere una nuova metrica tracciata:
+1. Aggiungi l'inizializzazione della chiave Preference nel costruttore `MainPage()`
+2. Crea una proprietà pubblica con `get`/`set` che usa `Preferences.Get()`/`Preferences.Set()`
+3. Chiama `OnPropertyChanged()` nel setter
+4. Effettua il binding all'elemento UI in MainPage.xaml
 
-### To modify GPS behavior:
-- Change polling interval: Modify `await Task.Delay(10000)` in StartTracking()
-- Change accuracy: Modify `GeolocationAccuracy.Best` in GeolocationRequest
-- Change movement threshold: Modify `if (dist >= 25)` in OnPositionChanged()
+### Per modificare il comportamento GPS:
+- Cambiare l'intervallo di polling: Modifica `await Task.Delay(10000)` in StartTracking()
+- Cambiare la precisione: Modifica `GeolocationAccuracy.Best` in GeolocationRequest
+- Cambiare la soglia di movimento: Modifica `if (dist >= 25)` in OnPositionChanged()
 
-### To add new level images:
-1. Add image to `Resources/Images/`
-2. Update `ImmagineAdatta()` and `ImmagineSfondo()` logic
-3. Update `AggiornaMusetto()` calculation (currently `totDist % 3000` for 3000m levels)
+### Per aggiungere nuove immagini di livello:
+1. Aggiungi l'immagine in `Resources/Images/`
+2. Aggiorna la logica di `ImmagineAdatta()` e `ImmagineSfondo()`
+3. Aggiorna il calcolo di `AggiornaMusetto()` (attualmente `totDist % 3000` per livelli da 3000m)
